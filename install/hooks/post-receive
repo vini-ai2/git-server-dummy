@@ -1,0 +1,76 @@
+#!/bin/bash
+
+set -euo pipefail
+
+WORK_TREE="/srv/deploy/deployment_test"
+GIT_DIR="/srv/git/deployment_test.git"
+BUILD_DIR="/tmp/teensy_build"
+LOG="/tmp/deploy.log"
+
+mkdir -p "$WORK_TREE"
+mkdir -p "$BUILD_DIR"
+
+while read oldrev newrev refname
+do
+    echo "Log:" >> "$LOG"
+    echo "Push received: $(date)" >> "$LOG"
+    echo "Ref : $refname" >> "$LOG"
+    echo "Old : $oldrev" >> "$LOG"
+    echo "New : $newrev" >> "$LOG"
+
+    git --work-tree="$WORK_TREE" \
+        --git-dir="$GIT_DIR" \
+        checkout -f "$newrev" >> "$LOG" 2>&1
+
+    CHANGED_FILES=$(git diff --name-only "$oldrev" "$newrev")
+
+    echo "Changed files:" >> "$LOG"
+    echo "$CHANGED_FILES" >> "$LOG"
+
+    if [ -n "$CHANGED_FILES" ]; then
+
+        echo "Source changes detected." >> "$LOG"
+
+        cd "$WORK_TREE"
+
+        rm -rf "$BUILD_DIR"/*
+        mkdir -p "$BUILD_DIR"
+
+        echo "Build is initiated to start" >> "$LOG"
+
+        if arduino-cli compile \
+            --fqbn teensy:avr:teensy41 . \
+            --output-dir "$BUILD_DIR" \
+            >> "$LOG" 2>&1
+        then
+            echo "Build successful." >> "$LOG"
+
+            HEX_FILE=$(find "$BUILD_DIR" -name "*.hex" | head -n 1)
+
+            if [ -z "$HEX_FILE" ]; then
+                echo "ERROR: No HEX file produced." >> "$LOG"
+                exit 1
+            fi
+
+            echo "Flashing onto the teensy" >> "$LOG"
+
+            teensy_loader_cli \
+                --mcu=TEENSY41 \
+                -w \
+                -v \
+                "$HEX_FILE" \
+                >> "$LOG" 2>&1
+
+            echo "Flash successful." >> "$LOG"
+
+        else
+            echo "Build failed." >> "$LOG"
+        fi
+
+    else
+        echo "No source changes detected. Skipping build." >> "$LOG"
+    fi
+
+done
+
+echo "Deployment hook finished." >> "$LOG"
