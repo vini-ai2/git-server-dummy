@@ -2,13 +2,11 @@
 
 set -euo pipefail
 
-WORK_TREE="/srv/deploy/deployment_test"
-GIT_DIR="/srv/git/deployment_test.git"
-BUILD_DIR="/tmp/teensy_build"
+WORK_TREE="/srv/deploy/dummy_repo_1"
+GIT_DIR="/srv/git/dummy_repo_1.git"
 LOG="/tmp/deploy.log"
 
 mkdir -p "$WORK_TREE"
-mkdir -p "$BUILD_DIR"
 
 while read oldrev newrev refname
 do
@@ -22,53 +20,36 @@ do
         --git-dir="$GIT_DIR" \
         checkout -f "$newrev" >> "$LOG" 2>&1
 
-    CHANGED_FILES=$(git diff --name-only "$oldrev" "$newrev")
+    CHANGED_FILES=$(git --git-dir="$GIT_DIR" diff --name-only "$oldrev" "$newrev")
 
     echo "Changed files:" >> "$LOG"
     echo "$CHANGED_FILES" >> "$LOG"
 
-    if [ -n "$CHANGED_FILES" ]; then
+    HEX_FILES=$(echo "$CHANGED_FILES" | grep -E '^firmware/.*\.hex$' || true)
 
-        echo "Source changes detected." >> "$LOG"
+    if [ -n "$HEX_FILES" ]; then
+        echo "Firmware HEX changed." >> "$LOG"
 
-        cd "$WORK_TREE"
+        HEX_FILE="$WORK_TREE/$(echo "$HEX_FILES" | head -n 1)"
 
-        rm -rf "$BUILD_DIR"/*
-        mkdir -p "$BUILD_DIR"
-
-        echo "Build is initiated to start" >> "$LOG"
-
-        if arduino-cli compile \
-            --fqbn teensy:avr:teensy41 . \
-            --output-dir "$BUILD_DIR" \
-            >> "$LOG" 2>&1
-        then
-            echo "Build successful." >> "$LOG"
-
-            HEX_FILE=$(find "$BUILD_DIR" -name "*.hex" | head -n 1)
-
-            if [ -z "$HEX_FILE" ]; then
-                echo "ERROR: No HEX file produced." >> "$LOG"
-                exit 1
-            fi
-
-            echo "Flashing onto the teensy" >> "$LOG"
-
-            teensy_loader_cli \
-                --mcu=TEENSY41 \
-                -w \
-                -v \
-                "$HEX_FILE" \
-                >> "$LOG" 2>&1
-
-            echo "Flash successful." >> "$LOG"
-
-        else
-            echo "Build failed." >> "$LOG"
+        if [ ! -f "$HEX_FILE" ]; then
+            echo "ERROR: HEX file not found: $HEX_FILE" >> "$LOG"
+            exit 1
         fi
 
+        echo "HEX file found: $HEX_FILE" >> "$LOG"
+        echo "Flashing onto the Teensy..." >> "$LOG"
+
+        /usr/local/bin/teensy_loader_cli \
+            --mcu=TEENSY41 \
+            -w \
+            -v \
+            "$HEX_FILE" \
+            >> "$LOG" 2>&1
+
+        echo "Flash successful." >> "$LOG"
     else
-        echo "No source changes detected. Skipping build." >> "$LOG"
+        echo "No firmware HEX changes detected. Skipping deployment." >> "$LOG"
     fi
 
 done
