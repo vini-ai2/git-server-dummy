@@ -39,6 +39,12 @@ do
 
         echo "HEX file found: $HEX_FILE" >> "$LOG"
         echo "Flashing onto the Teensy..." >> "$LOG"
+        
+        ls /dev/ | grep 'teensy' 2&> "$LOG"
+        if [[ "$?" -ne 0 ]]; then
+           echo "ERROR: Teensy not detected! Review above log for further info.\n" >> "$LOG"
+     	   exit 1
+        fi
 
         /usr/local/bin/teensy_loader_cli \
             --mcu=TEENSY41 \
